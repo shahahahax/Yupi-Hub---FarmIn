@@ -85,6 +85,8 @@ local cfg = {
     itemDiambil = "Semua",
     jarakAmbil = 2,
     autoDestroy = true, -- auto hancurkan script lama
+    autoMisi = false, -- auto complete misi (reservasi + prioritas + auto claim)
+    misiFokus = "Semua", -- misi mana diselesaikan dulu: Semua / 1 Teratas / 3 Teratas / 5 Teratas
     autoResearchLab = false,
     researchPilihan = {"RebirthOptimization","RevenueOverclock"}, -- prioritas research (baru)
     researchPriority = {"RebirthOptimization","RevenueOverclock"}, -- legacy untuk dropdown lama
@@ -132,11 +134,17 @@ local function isKecualikan(item)
     end
     return false
 end
+-- AUTO MISI - lapisan reservasi stok (hitung ulang tiap siklus, auto clear saat misi hilang)
+local missionReserved = {} -- [itemName] = total Target di-reserve (di-sum semua misi)
 local function getFilteredTotal()
     local inv = getInventory()
     local c = 0
     for item, cnt in pairs(inv) do
-        if DeliveryConfig.Items[item] and allowKirim(item) and not isKecualikan(item) then c += cnt end
+        if DeliveryConfig.Items[item] and allowKirim(item) and not isKecualikan(item) then
+            local use = cnt
+            if cfg.autoMisi then use = math.max(0, cnt - (missionReserved[item] or 0)) end
+            c += use
+        end
     end
     return c
 end
@@ -145,9 +153,94 @@ local function getFilteredWeight()
     local w = 0
     for item, cnt in pairs(inv) do
         local it = DeliveryConfig.Items[item]
-        if it and allowKirim(item) and not isKecualikan(item) then w += (it.Weight or 1) * cnt end
+        if it and allowKirim(item) and not isKecualikan(item) then
+            local use = cnt
+            if cfg.autoMisi then use = math.max(0, cnt - (missionReserved[item] or 0)) end
+            w += (it.Weight or 1) * use
+        end
     end
     return w
+end
+local function getMisiFocus()
+    local open, done = {}, {}
+    pcall(function()
+        local qs = HttpService:JSONDecode(LocalPlayer:GetAttribute("ActiveQuests_JSON") or "[]")
+        if type(qs) == "table" then
+            for _, q in ipairs(qs) do
+                if type(q.Items) == "table" then
+                    if q.Completed then done[#done + 1] = q else open[#open + 1] = q end
+                end
+            end
+        end
+    end)
+    local mode = type(cfg.misiFokus) == "table" and cfg.misiFokus[1] or cfg.misiFokus
+    local n = 0
+    if type(mode) == "string" and mode ~= "Semua" then n = tonumber(string.match(mode, "%d+")) or 0 end
+    local focus = {}
+    if n <= 0 then
+        for _, q in ipairs(open) do if q.Id then focus[q.Id] = true end end
+    else
+        for i = 1, math.min(n, #open) do if open[i].Id then focus[open[i].Id] = true end end
+    end
+    for _, q in ipairs(done) do if q.Id then focus[q.Id] = true end end
+    return open, done, focus, n > 0
+end
+local function refreshReserved()
+    local res = {}
+    if cfg.autoMisi then
+        local open, done, focus = getMisiFocus()
+        local function add(q)
+            for _, it in ipairs(q.Items) do
+                if it.Name and tonumber(it.Target) then
+                    res[it.Name] = (res[it.Name] or 0) + it.Target
+                end
+            end
+        end
+        for _, q in ipairs(open) do if q.Id and focus[q.Id] then add(q) end end
+        for _, q in ipairs(done) do add(q) end
+    end
+    missionReserved = res
+    return res
+end
+local function getAvail(name)
+    local total = (getInventory()[name] or 0)
+    if not cfg.autoMisi then return total end
+    local avail = total - (missionReserved[name] or 0)
+    if avail < 0 then avail = 0 end
+    return avail
+end
+local function getMisiLines()
+    local lines = {}
+    pcall(function()
+        local inv = getInventory()
+        local open, done, focus, limited = getMisiFocus()
+        local n = 0
+        local function push(q)
+            n += 1
+            local ndone = 0
+            local names = {}
+            for _, it in ipairs(q.Items) do
+                local have = (inv[it.Name] or 0)
+                if have >= (tonumber(it.Target) or 0) then ndone += 1 end
+                names[#names + 1] = it.Name .. " " .. have .. "/" .. tostring(it.Target)
+            end
+            local mark = ""
+            if q.Completed then mark = " [SELESAI]" elseif limited and q.Id and focus[q.Id] then mark = " [FOKUS]" end
+            lines[#lines + 1] = n .. ". " .. tostring(q.Title) .. " (" .. ndone .. "/" .. #q.Items .. ")" .. mark
+            for i = 1, #names, 2 do
+                local chunk = names[i]
+                if names[i + 1] then chunk = chunk .. ", " .. names[i + 1] end
+                lines[#lines + 1] = "    " .. chunk
+            end
+        end
+        for _, q in ipairs(open) do push(q) end
+        for _, q in ipairs(done) do push(q) end
+    end)
+    if #lines == 0 then return {"Tidak ada misi"} end
+    return lines
+end
+local function getReservedText()
+    return table.concat(getMisiLines(), "\n")
 end
 local function getWaterAmount() return LocalPlayer:GetAttribute("WaterAmount") or 0 end
 local function getMaxWater()
@@ -212,6 +305,7 @@ local RemotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 local RequestStartProduction = RemotesFolder and RemotesFolder:FindFirstChild("RequestStartProduction") or ReplicatedStorage:WaitForChild("RequestStartProduction")
 local RequestClaimProduction = RemotesFolder and RemotesFolder:FindFirstChild("RequestClaimProduction") or ReplicatedStorage:WaitForChild("RequestClaimProduction")
 local RequestSendDelivery = ReplicatedStorage:WaitForChild("RequestSendDelivery")
+local ClaimQuestRemote = (RemotesFolder and RemotesFolder:FindFirstChild("ClaimQuest")) or ReplicatedStorage:WaitForChild("ClaimQuest")
 local FACTORIES = {"FlourFactory","BreadFactory","YarnFactory","SweaterFactory","SausageFactory","HotdogFactory","ButterFactory","CheeseFactory"}
 local TIERS = {"Default","Gold","Sakura","Cosmic"}
 
@@ -304,6 +398,41 @@ cfg.produksiLagi = true
 cfg.produksiTerus = false
 cfg.modeProduksi = "Setelah hasil diambil" -- dummy, tidak dipakai
 FactoryTab:CreateText({ name = "Info Factory", text = "🏭 Produksi → 📦 Ambil Otomatis → 🏭 Bulk Produksi Lagi x Jumlah" })
+FactoryTab:CreateToggle({
+    name = "Auto Misi",
+    description = "Reserve stok misi + prioritaskan produksi + auto claim",
+    value = false,
+    flag = "AutoMisi",
+    callback = function(v)
+        cfg.autoMisi = v
+        if v then refreshReserved() else missionReserved = {} end
+        log("Auto Misi: "..tostring(v))
+        notify("Auto Misi", v and "AKTIF" or "MATI", 2)
+    end,
+})
+FactoryTab:CreateDropdown({
+    name = "Fokus Misi",
+    description = "Misi mana diselesaikan dulu (urutan daftar). claim tetap semua yg selesai.",
+    options = {"Semua","1 Teratas","3 Teratas","5 Teratas"},
+    value = "Semua",
+    flag = "MisiFokus",
+    callback = function(v)
+        local val = type(v)=="table" and v[1] or v
+        cfg.misiFokus = val
+        if cfg.autoMisi then refreshReserved() end
+        log("Fokus misi: "..tostring(val))
+        notify("Fokus Misi", tostring(val), 2)
+    end,
+})
+local misiStatusText = FactoryTab:CreateText({ name = "Daftar Misi", text = "Auto Misi OFF" })
+FactoryTab:CreateButton({
+    name = "LIHAT MISI",
+    description = "Tampilkan daftar misi + reserve di log",
+    callback = function()
+        refreshReserved()
+        for _, line in ipairs(getMisiLines()) do log(line) end
+    end,
+})
 
 -- WATER TAB
 WaterTab:CreateText({ name = "Perawatan Rumput", text = "Jaga rumput tetap hijau" })
@@ -406,14 +535,17 @@ DeliveryTab:CreateButton({
     description = "Kirim semua isi tas sekarang",
     callback = function()
         notify("Kirim", "Mengirim...", 1.5)
+        if cfg.autoMisi then refreshReserved() end
         local inv = getInventory()
         local payload, totalW = {}, 0
         local lvl = LocalPlayer:GetAttribute("DeliveryLevel") or 1
         local cap = (DeliveryConfig.Levels[lvl] and DeliveryConfig.Levels[lvl].Capacity) or 4000
         for item,cnt in pairs(inv) do
-            if DeliveryConfig.Items[item] and cnt>0 and allowKirim(item) and not isKecualikan(item) then
+            local have2 = cnt
+            if cfg.autoMisi then have2 = math.max(0, cnt - (missionReserved[item] or 0)) end
+            if DeliveryConfig.Items[item] and have2>0 and allowKirim(item) and not isKecualikan(item) then
                 local w = DeliveryConfig.Items[item].Weight or 1
-                local can = math.min(cnt, math.floor((cap-totalW)/w))
+                local can = math.min(have2, math.floor((cap-totalW)/w))
                 if can>0 then payload[item]=can; totalW+=can*w end
             end
         end
@@ -631,8 +763,7 @@ local function tryStart(factory, tier, amount)
     if not c then return false end
     local suffix = TierSuffix[tier] or ""
     local name = c.InputName .. suffix
-    local inv = getInventory()
-    local have = inv[name] or 0
+    local have = getAvail(name)
     local need = getInputReq(factory, tier) * amount
     if have < need then return false end
     local ok,a = pcall(function() return RequestStartProduction:InvokeServer("Start", factory, amount, tier) end)
@@ -648,7 +779,7 @@ local function tryClaim(factory)
                 local c = FactoryConfig.Config[factory]
                 if c then
                     local name = c.InputName .. (TierSuffix[tier] or "")
-                    local have = (getInventory()[name] or 0)
+                    local have = getAvail(name)
                     local per = getInputReq(factory, tier)
                     if have >= per then
                         local maxAmt = math.min(cfg.amount, math.floor(have/per))
@@ -675,21 +806,56 @@ pcall(function() Window:OnDestroy(function() getgenv().YupiHub_Alive=false end) 
 task.spawn(function()
     while alive() do
         if cfg.autoProduksi then
+            if cfg.autoMisi then refreshReserved() end
             -- 1. Ambil hasil yang sudah jadi (bulk)
             for _, f in ipairs(FACTORIES) do
                 if not alive() then break end
                 tryClaim(f)
                 task.wait(0.12)
             end
-            -- 2. Coba start produksi bulk untuk semua factory yang punya bahan (biar gak nunggu claim)
-            for _, f in ipairs(FACTORIES) do
+            -- 2. Coba start produksi bulk untuk semua factory yang punya bahan (misi diprioritaskan)
+            local order = FACTORIES
+            if cfg.autoMisi then
+                local needFirst, rest = {}, {}
+                for _, f in ipairs(FACTORIES) do
+                    local c0 = FactoryConfig.Config[f]
+                    local need = false
+                    if c0 and c0.OutputName then
+                        for _, t2 in ipairs(TIERS) do
+                            local out = c0.OutputName .. (TierSuffix[t2] or "")
+                            if (missionReserved[out] or 0) > 0 then need = true break end
+                        end
+                    end
+                    if need then needFirst[#needFirst + 1] = f else rest[#rest + 1] = f end
+                end
+                order = {}
+                for _, f in ipairs(needFirst) do order[#order + 1] = f end
+                for _, f in ipairs(rest) do order[#order + 1] = f end
+            end
+            for _, f in ipairs(order) do
                 if not alive() then break end
                 local c = FactoryConfig.Config[f]
                 local lvl = LocalPlayer:GetAttribute("Level") or 1
                 if c and lvl >= (c.UnlockPlayerLevel or 1) then
-                    for _, tier in ipairs(cfg.enabledTiers or TIERS) do
+                    local tiers = cfg.enabledTiers or TIERS
+                    if cfg.autoMisi and c.OutputName then
+                        local seen = {}
+                        for _, t in ipairs(tiers) do seen[t] = true end
+                        local merged = {}
+                        for _, t in ipairs(TIERS) do
+                            if not seen[t] then
+                                local out = c.OutputName .. (TierSuffix[t] or "")
+                                if (missionReserved[out] or 0) > 0 then merged[#merged + 1] = t end
+                            end
+                        end
+                        if #merged > 0 then
+                            for _, t in ipairs(tiers) do merged[#merged + 1] = t end
+                            tiers = merged
+                        end
+                    end
+                    for _, tier in ipairs(tiers) do
                         local name = c.InputName .. (TierSuffix[tier] or "")
-                        local have = (getInventory()[name] or 0)
+                        local have = getAvail(name)
                         local per = getInputReq(f, tier)
                         if have >= per then
                             local maxAmt = math.min(cfg.amount, math.floor(have / per))
@@ -697,7 +863,7 @@ task.spawn(function()
                             local qLen = 0
                             local maxQ = 3
                             pcall(function()
-                                local qData = HttpService:JSONDecode(lp:GetAttribute("FactoryQueue_JSON") or "{}")
+                                local qData = HttpService:JSONDecode(LocalPlayer:GetAttribute("FactoryQueue_JSON") or "{}")
                                 if qData[f] and qData[f].Q then qLen = #qData[f].Q end
                                 -- coba ambil MaxQueue dari config jika ada
                                 if c.QueueSize then maxQ = c.QueueSize end
@@ -733,6 +899,7 @@ task.spawn(function()
         task.wait(1)
         if cfg.autoKirim and alive() and not LocalPlayer:GetAttribute("IsDelivering") then
             if os.clock() - lastSend >= cfg.intervalKirim then
+                if cfg.autoMisi then refreshReserved() end
                 local shouldSend, reason = false, ""
                 local mode = cfg.kirimBerdasarkan
                 if mode == "Setiap 22 detik" then mode = "Setiap Interval" end
@@ -745,7 +912,11 @@ task.spawn(function()
                     local payload, totalW={},0
                     local lvl=LocalPlayer:GetAttribute("DeliveryLevel") or 1
                     local cap=(DeliveryConfig.Levels[lvl] and DeliveryConfig.Levels[lvl].Capacity) or 4000
-                    for item,cnt in pairs(inv) do if DeliveryConfig.Items[item] and cnt>0 and allowKirim(item) and not isKecualikan(item) then local w=DeliveryConfig.Items[item].Weight or 1; local can=math.min(cnt, math.floor((cap-totalW)/w)); if can>0 then payload[item]=can; totalW+=can*w end end end
+                    for item, cnt in pairs(inv) do
+                        local have2 = cnt
+                        if cfg.autoMisi then have2 = math.max(0, cnt - (missionReserved[item] or 0)) end
+                        if DeliveryConfig.Items[item] and have2>0 and allowKirim(item) and not isKecualikan(item) then local w=DeliveryConfig.Items[item].Weight or 1; local can=math.min(have2, math.floor((cap-totalW)/w)); if can>0 then payload[item]=can; totalW+=can*w end end
+                    end
                     if next(payload)~=nil then
                         local ok,a,b=pcall(function() return RequestSendDelivery:InvokeServer(payload) end)
                         if ok and a then log("Kirim ["..reason.."] "..totalW.."kg"); notify("Kirim", "Terkirim "..totalW.."kg ("..reason..")", 3) lastSend = os.clock() end
@@ -931,6 +1102,49 @@ task.spawn(function()
                     task.wait(0.2)
                 end
             end)
+        end
+    end
+end)
+
+-- Auto Misi: claim misi selesai + refresh reserve (reserve auto clear saat misi hilang)
+task.spawn(function()
+    while alive() do
+        task.wait(10)
+        if cfg.autoMisi and alive() then
+            pcall(function()
+                local qs = HttpService:JSONDecode(LocalPlayer:GetAttribute("ActiveQuests_JSON") or "[]")
+                if type(qs) ~= "table" then return end
+                for _, q in ipairs(qs) do
+                    if not alive() then break end
+                    if q.Completed and q.Id and type(q.Items) == "table" then
+                        local ready = true
+                        local inv = getInventory()
+                        for _, it in ipairs(q.Items) do
+                            if (inv[it.Name] or 0) < (tonumber(it.Target) or 0) then ready = false break end
+                        end
+                        if ready then
+                            local ok, res = pcall(function() return ClaimQuestRemote:InvokeServer(q.Id) end)
+                            if ok and res then
+                                log("Misi selesai: " .. tostring(q.Title or q.Id) .. " klaim OK")
+                                notify("Misi", "Klaim " .. tostring(q.Title or q.Id), 2.5)
+                            end
+                        end
+                        task.wait(0.5)
+                    end
+                end
+            end)
+            refreshReserved()
+        end
+    end
+end)
+
+-- Auto Misi: update daftar misi di tab Factory tiap 5 detik
+task.spawn(function()
+    while alive() do
+        task.wait(5)
+        if cfg.autoMisi and alive() then
+            refreshReserved()
+            pcall(function() misiStatusText:Set(getReservedText()) end)
         end
     end
 end)
