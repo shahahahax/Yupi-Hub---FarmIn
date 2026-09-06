@@ -333,7 +333,7 @@ end)
 
 -- FACTORY TAB - Bulk Otomatis (Mode Produksi dihapus, selalu bulk)
 FactoryTab:CreateText({ name = "Produksi Otomatis", text = "Bulk Otomatis - Pilih jumlah & tier, produksi jalan sendiri" })
-FactoryTab:CreateToggle({
+local autoProduksiToggle = FactoryTab:CreateToggle({
     name = "Auto Produksi",
     description = "ON = otomatis ambil + bulk produksi, OFF = stop total",
     value = true,
@@ -347,7 +347,7 @@ FactoryTab:CreateToggle({
     end,
 })
 cfg.autoProduksi = true
-FactoryTab:CreateDropdown({
+local jumlahDropdown = FactoryTab:CreateDropdown({
     name = "Jumlah Produksi",
     description = "Jumlah produk setiap kali pabrik mulai",
     options = {"1","2","5","10"},
@@ -360,7 +360,7 @@ FactoryTab:CreateDropdown({
         notify("Jumlah Produksi", val.." produk", 2)
     end,
 })
-FactoryTab:CreateDropdown({
+local tierDropdown = FactoryTab:CreateDropdown({
     name = "Tier Produksi",
     description = "Pilih tier - Semua = bulk Emas+Sakura+Cosmic, atau pilih spesifik. Default tier dihapus.",
     options = {"Semua","Emas","Sakura","Cosmic"},
@@ -398,7 +398,7 @@ cfg.produksiLagi = true
 cfg.produksiTerus = false
 cfg.modeProduksi = "Setelah hasil diambil" -- dummy, tidak dipakai
 FactoryTab:CreateText({ name = "Info Factory", text = "🏭 Produksi → 📦 Ambil Otomatis → 🏭 Bulk Produksi Lagi x Jumlah" })
-FactoryTab:CreateToggle({
+local autoMisiToggle = FactoryTab:CreateToggle({
     name = "Auto Misi",
     description = "Reserve stok misi + prioritaskan produksi + auto claim",
     value = false,
@@ -410,7 +410,7 @@ FactoryTab:CreateToggle({
         notify("Auto Misi", v and "AKTIF" or "MATI", 2)
     end,
 })
-FactoryTab:CreateDropdown({
+local fokusDropdown = FactoryTab:CreateDropdown({
     name = "Fokus Misi",
     description = "Misi mana diselesaikan dulu (urutan daftar). claim tetap semua yg selesai.",
     options = {"Semua","1 Teratas","3 Teratas","5 Teratas"},
@@ -433,6 +433,170 @@ FactoryTab:CreateButton({
         for _, line in ipairs(getMisiLines()) do log(line) end
     end,
 })
+
+-- FACTORY CONFIG - simpan/muat setting tab Factory (folder FactoryConfigs/)
+local CONFIG_DIR = "FactoryConfigs"
+local selectedConfig, newConfigName, configDropdown = nil, "", nil
+local function ensureConfigDir()
+    pcall(function()
+        if isfolder(CONFIG_DIR) then return end
+        makefolder(CONFIG_DIR)
+    end)
+end
+local function configPath(name) return CONFIG_DIR .. "/" .. name .. ".json" end
+local function cleanConfigName(name)
+    if type(name) ~= "string" then return "" end
+    local s = string.match(name, "^%s*(.-)%s*$") or ""
+    s = string.gsub(s, "[/\\]", "_")
+    return s
+end
+local function collectFactoryConfig()
+    return {
+        version = 1,
+        autoProduksi = cfg.autoProduksi,
+        amount = cfg.amount,
+        enabledTiers = cfg.enabledTiers,
+        autoMisi = cfg.autoMisi,
+        misiFokus = type(cfg.misiFokus) == "table" and cfg.misiFokus[1] or cfg.misiFokus,
+    }
+end
+local function ListConfigs()
+    local names = {}
+    pcall(function()
+        ensureConfigDir()
+        for _, p in ipairs(listfiles(CONFIG_DIR)) do
+            local n = string.match(p, "([^/\\]+)%.json$")
+            if n then names[#names + 1] = n end
+        end
+    end)
+    table.sort(names)
+    return names
+end
+local function refreshConfigList()
+    if not configDropdown then return end
+    local names = ListConfigs()
+    if #names == 0 then names = {"Belum ada config"} end
+    pcall(function() configDropdown:Refresh(names) end)
+    if not selectedConfig then selectedConfig = names[1] end
+end
+local tierToDisplay = {Default = nil, Gold = "Emas", Sakura = "Sakura", Cosmic = "Cosmic"}
+local function applyFactoryConfig(data)
+    if type(data) ~= "table" then return false end
+    if data.autoProduksi ~= nil then
+        cfg.autoProduksi = (data.autoProduksi == true)
+        cfg.autoAmbil = cfg.autoProduksi
+        cfg.produksiLagi = cfg.autoProduksi
+    end
+    if tonumber(data.amount) then cfg.amount = math.floor(tonumber(data.amount)) end
+    if type(data.enabledTiers) == "table" and #data.enabledTiers > 0 then cfg.enabledTiers = data.enabledTiers end
+    if data.autoMisi ~= nil then cfg.autoMisi = (data.autoMisi == true) end
+    if type(data.misiFokus) == "string" then cfg.misiFokus = data.misiFokus end
+    if cfg.autoMisi then refreshReserved() else missionReserved = {} end
+    pcall(function() autoProduksiToggle:Set(cfg.autoProduksi) end)
+    pcall(function() jumlahDropdown:Set(tostring(cfg.amount)) end)
+    local disp = {}
+    local hasAll = false
+    pcall(function()
+        local set = {}
+        for _, t in ipairs(cfg.enabledTiers or {}) do set[t] = true end
+        if set.Default and set.Gold and set.Sakura and set.Cosmic then hasAll = true end
+    end)
+    if hasAll then
+        disp = {"Semua"}
+    else
+        for _, t in ipairs(cfg.enabledTiers or {}) do
+            if tierToDisplay[t] then disp[#disp + 1] = tierToDisplay[t] end
+        end
+    end
+    if #disp > 0 then pcall(function() tierDropdown:Set(disp) end) end
+    pcall(function() autoMisiToggle:Set(cfg.autoMisi) end)
+    pcall(function() fokusDropdown:Set(cfg.misiFokus) end)
+    pcall(function() misiStatusText:Set(cfg.autoMisi and getReservedText() or "Auto Misi OFF") end)
+    return true
+end
+local function SaveConfig(name)
+    name = cleanConfigName(name)
+    if name == "" then notify("Config", "Nama config kosong", 2.5) return false end
+    ensureConfigDir()
+    local ok, err = pcall(function()
+        writefile(configPath(name), HttpService:JSONEncode(collectFactoryConfig()))
+    end)
+    if ok then
+        selectedConfig = name
+        log("Config tersimpan: " .. name)
+        notify("Config", "Tersimpan " .. name, 2)
+        refreshConfigList()
+    else
+        notify("Config", "Gagal simpan: " .. tostring(err), 3)
+    end
+    return ok
+end
+local function LoadConfig(name)
+    name = cleanConfigName(name)
+    if name == "" or name == "Belum ada config" then notify("Config", "Pilih config dulu", 2.5) return false end
+    ensureConfigDir()
+    local exists = false
+    pcall(function() exists = isfile(configPath(name)) end)
+    if not exists then notify("Config", "File tidak ditemukan: " .. name, 3) return false end
+    local ok, data = pcall(function() return HttpService:JSONDecode(readfile(configPath(name))) end)
+    if not ok or type(data) ~= "table" then notify("Config", "File rusak: " .. name, 3) return false end
+    applyFactoryConfig(data)
+    selectedConfig = name
+    log("Config dimuat: " .. name)
+    notify("Config", "Dimuat " .. name, 2)
+    return true
+end
+local function DeleteConfig(name)
+    name = cleanConfigName(name)
+    if name == "" or name == "Belum ada config" then notify("Config", "Pilih config dulu", 2.5) return false end
+    local ok, err = pcall(function() delfile(configPath(name)) end)
+    if ok then
+        if selectedConfig == name then selectedConfig = nil end
+        log("Config dihapus: " .. name)
+        notify("Config", "Dihapus " .. name, 2)
+        refreshConfigList()
+    else
+        notify("Config", "Gagal hapus: " .. tostring(err), 3)
+    end
+    return ok
+end
+SettingsTab:CreateText({ name = "Config Title", text = "Simpan & muat setting Factory" })
+configDropdown = SettingsTab:CreateDropdown({
+    name = "Pilih Config",
+    description = "Daftar config yang tersimpan",
+    options = {"Belum ada config"},
+    value = "Belum ada config",
+    flag = "PilihConfig",
+    callback = function(v)
+        local val = type(v)=="table" and v[1] or v
+        selectedConfig = val
+        log("Config dipilih: " .. tostring(val))
+    end,
+})
+SettingsTab:CreateInput({
+    name = "Nama Config Baru",
+    placeholder = "cth: hemat-bahan (Enter)",
+    flag = "NamaConfig",
+    callback = function(v)
+        newConfigName = type(v)=="table" and v[1] or v
+    end,
+})
+SettingsTab:CreateButton({
+    name = "SAVE CONFIG",
+    description = "Simpan setting saat ini ke nama config",
+    callback = function() SaveConfig(newConfigName) end,
+})
+SettingsTab:CreateButton({
+    name = "LOAD CONFIG",
+    description = "Muat config terpilih + sinkron tampilan",
+    callback = function() LoadConfig(selectedConfig) end,
+})
+SettingsTab:CreateButton({
+    name = "DELETE CONFIG",
+    description = "Hapus config terpilih",
+    callback = function() DeleteConfig(selectedConfig) end,
+})
+refreshConfigList()
 
 -- WATER TAB
 WaterTab:CreateText({ name = "Perawatan Rumput", text = "Jaga rumput tetap hijau" })
