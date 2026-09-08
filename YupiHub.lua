@@ -11,6 +11,46 @@ local myInstance = getgenv().YupiHub_Instance
 getgenv().YupiHub_Alive = true
 
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
+-- YUPI DARK - tema gelap kustom (palet aksesibel, kontras teks >= 4.5:1)
+local YupiDarkTheme = {
+    TextColor = Color3.fromRGB(245, 245, 245),
+    Background = Color3.fromRGB(26, 26, 26),
+    Topbar = Color3.fromRGB(36, 36, 36),
+    Shadow = Color3.fromRGB(13, 13, 13),
+    NotificationBackground = Color3.fromRGB(36, 36, 36),
+    NotificationActionsBackground = Color3.fromRGB(245, 245, 245),
+    TabBackground = Color3.fromRGB(36, 36, 36),
+    TabStroke = Color3.fromRGB(51, 51, 51),
+    TabBackgroundSelected = Color3.fromRGB(245, 245, 245),
+    TabTextColor = Color3.fromRGB(156, 163, 175),
+    SelectedTabTextColor = Color3.fromRGB(18, 18, 18),
+    ElementBackground = Color3.fromRGB(30, 30, 30),
+    ElementBackgroundHover = Color3.fromRGB(42, 42, 42),
+    SecondaryElementBackground = Color3.fromRGB(36, 36, 36),
+    ElementStroke = Color3.fromRGB(58, 58, 58),
+    SecondaryElementStroke = Color3.fromRGB(46, 46, 46),
+    SliderBackground = Color3.fromRGB(51, 51, 51),
+    SliderProgress = Color3.fromRGB(59, 130, 246),
+    SliderStroke = Color3.fromRGB(147, 197, 253),
+    ToggleBackground = Color3.fromRGB(42, 42, 42),
+    ToggleEnabled = Color3.fromRGB(37, 99, 235),
+    ToggleDisabled = Color3.fromRGB(82, 82, 82),
+    ToggleEnabledStroke = Color3.fromRGB(59, 130, 246),
+    ToggleDisabledStroke = Color3.fromRGB(115, 115, 115),
+    ToggleEnabledOuterStroke = Color3.fromRGB(30, 64, 175),
+    ToggleDisabledOuterStroke = Color3.fromRGB(58, 58, 58),
+    DropdownSelected = Color3.fromRGB(42, 42, 42),
+    DropdownUnselected = Color3.fromRGB(30, 30, 30),
+    InputBackground = Color3.fromRGB(30, 30, 30),
+    InputStroke = Color3.fromRGB(58, 58, 58),
+    PlaceholderColor = Color3.fromRGB(156, 163, 175),
+}
+local YUPI_RED_BG = Color3.fromRGB(58, 31, 31)
+local YUPI_RED_TEXT = Color3.fromRGB(248, 113, 113)
+local YUPI_RED_BAR = Color3.fromRGB(239, 68, 68)
+local YUPI_RED_STROKE = Color3.fromRGB(127, 29, 29)
+local YUPI_GRAY = Color3.fromRGB(156, 163, 175)
+local YUPI_ICON = Color3.fromRGB(209, 213, 219)
 -- Auto hancurkan bekas script di layar (banyak window numpuk) - FIX: cari di RobloxGui
 pcall(function()
     local doDestroy = true
@@ -50,6 +90,7 @@ pcall(function()
 end)
 local Window = Rayfield:CreateWindow({
     Name = "Yupi Hub",
+    Theme = YupiDarkTheme,
     ConfigurationSaving = { Enabled = true, FileName = "YupiHub" }
 })
 local function notify(title, content, duration)
@@ -64,6 +105,7 @@ local DeliveryTab = Window:CreateTab({ Name = "Delivery", Icon = "truck" })
 local MagnetTab = Window:CreateTab({ Name = "Magnet", Icon = "magnet" })
 local SettingsTab = Window:CreateTab({ Name = "Settings", Icon = "settings" })
 local UpgradeTab = Window:CreateTab({ Name = "Upgrade", Icon = "trending-up" })
+local WolfTab = Window:CreateTab({ Name = "Serigala", Icon = "moon" })
 
 -- State
 local cfg = {
@@ -85,6 +127,10 @@ local cfg = {
     itemDiambil = "Semua",
     jarakAmbil = 2,
     autoDestroy = true, -- auto hancurkan script lama
+    autoSpeed = false, -- auto speed (kunci WalkSpeed 1-100)
+    speedTarget = 36, -- target WalkSpeed (1 pelan - 100 tercepat)
+    autoWolf = false, -- auto hajar serigala se-map
+    wolfMinHp = 30, -- mundur kalau HP di bawah ini (%)
     autoMisi = false, -- auto complete misi (reservasi + prioritas + auto claim)
     misiFokus = "Semua", -- misi mana diselesaikan dulu: Semua / 1 Teratas / 3 Teratas / 5 Teratas
     autoResearchLab = false,
@@ -136,6 +182,12 @@ local function isKecualikan(item)
 end
 -- AUTO MISI - lapisan reservasi stok (hitung ulang tiap siklus, auto clear saat misi hilang)
 local missionReserved = {} -- [itemName] = total Target di-reserve (di-sum semua misi)
+-- forward declaration handle kontrol tab (dibuat di bawah) agar applyFactoryConfig bisa sinkron tampilan
+local siramToggle, waktuSiramDropdown, isiAirToggle, isiSaatSlider
+local autoKirimToggle, kirimDropdown, intervalSlider, jenisDropdown, kecualikanDropdown
+local magnetToggle, itemDropdown, jarakSlider
+local autoDestroyToggle, researchToggle, farmToggle, researchDropdown, farmDropdown
+local wolfToggle, wolfMinSlider, wolfStatusText
 local function getFilteredTotal()
     local inv = getInventory()
     local c = 0
@@ -315,9 +367,51 @@ local statusFactory = MainTab:CreateStat({ name = "Factory", value = 0, suffix =
 local statusWater = MainTab:CreateStat({ name = "Water", value = math.floor((getWaterAmount()/getMaxWater())*100), suffix = "%" })
 local statusDelivery = MainTab:CreateStat({ name = "Delivery Items", value = getTotalItems(), suffix = "/360" })
 local statusMagnet = MainTab:CreateStat({ name = "Magnet", value = 0, suffix = "" })
+MainTab:CreateDivider({ text = "Kecepatan Lari" })
+local speedToggle = MainTab:CreateToggle({
+    name = "Auto Speed",
+    description = "Kunci WalkSpeed sesuai slider (1 pelan - 100 tercepat)",
+    value = false, flag = "AutoSpeed",
+    callback = function(v) cfg.autoSpeed = v; notify("Auto Speed", v and "AKTIF" or "MATI", 2) end,
+})
+local speedSlider = MainTab:CreateSlider({
+    name = "Target Speed",
+    description = "1 = pelan banget, 100 = paling cepat",
+    range = {1,100}, increment = 1, value = 36, suffix = "", flag = "SpeedTarget",
+    callback = function(v) cfg.speedTarget = v; notify("Target Speed", v, 1.5) end,
+})
 MainTab:CreateDivider({ text = "Recent Activity" })
 local console = MainTab:CreateConsole({ name = "Aktivitas", height = 100, follow = true, maxLines = 100 })
-local function log(msg) console:Append("["..os.date("%H:%M:%S").."] "..msg); print(msg) end
+local function styleConsoleText()
+    pcall(function()
+        local rg = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+        if not rg then return end
+        for _, v in ipairs(rg:GetDescendants()) do
+            if v.Name == "Aktivitas" and v:IsA("Frame") then
+                for _, d in ipairs(v:GetDescendants()) do
+                    if d:IsA("TextLabel") then pcall(function() d.RichText = true end) end
+                end
+            end
+        end
+    end)
+end
+local activityFeed = {}
+local dashBuilt = false
+local refreshDashActivity = nil
+local syncDashFactory = nil
+local function log(msg)
+    local stamp = os.date("%H:%M:%S")
+    console:Append('<font color="#9CA3AF">['..stamp..']</font> '..msg); print("["..stamp.."] "..msg)
+    styleConsoleText()
+    pcall(function()
+        local amt = string.match(msg, "([%+x]%d+)%s*$")
+        local clean = msg
+        if amt then clean = string.match(string.sub(msg, 1, #msg - #amt), "^(.-)%s*$") or msg end
+        table.insert(activityFeed, 1, {t = stamp, m = clean, a = amt or ""})
+        while #activityFeed > 25 do table.remove(activityFeed) end
+        if dashBuilt and refreshDashActivity then refreshDashActivity() end
+    end)
+end
 
 task.spawn(function()
     while task.wait(1) do
@@ -458,7 +552,35 @@ local function collectFactoryConfig()
         enabledTiers = cfg.enabledTiers,
         autoMisi = cfg.autoMisi,
         misiFokus = type(cfg.misiFokus) == "table" and cfg.misiFokus[1] or cfg.misiFokus,
+        autoKirim = cfg.autoKirim,
+        kirimBerdasarkan = cfg.kirimBerdasarkan,
+        intervalKirim = cfg.intervalKirim,
+        jenisKirim = cfg.jenisKirim,
+        kecualikan = cfg.kecualikan,
+        autoSiram = cfg.autoSiram,
+        waktuSiram = cfg.waktuSiram,
+        autoIsiAir = cfg.autoIsiAir,
+        isiSaat = cfg.isiSaat,
+        autoAmbilMagnet = cfg.autoAmbilMagnet,
+        itemDiambil = cfg.itemDiambil,
+        jarakAmbil = cfg.jarakAmbil,
+        autoDestroy = cfg.autoDestroy,
+        autoResearchLab = cfg.autoResearchLab,
+        researchPriority = cfg.researchPriority,
+        autoFarmMastery = cfg.autoFarmMastery,
+        farmMasteryPriority = cfg.farmMasteryPriority,
+        autoSpeed = cfg.autoSpeed,
+        speedTarget = cfg.speedTarget,
+        autoWolf = cfg.autoWolf,
+        wolfMinHp = cfg.wolfMinHp,
     }
+end
+local LAST_PATH = CONFIG_DIR .. "/last.json"
+local function saveLast()
+    pcall(function()
+        ensureConfigDir()
+        writefile(LAST_PATH, HttpService:JSONEncode(collectFactoryConfig()))
+    end)
 end
 local function ListConfigs()
     local names = {}
@@ -466,7 +588,7 @@ local function ListConfigs()
         ensureConfigDir()
         for _, p in ipairs(listfiles(CONFIG_DIR)) do
             local n = string.match(p, "([^/\\]+)%.json$")
-            if n then names[#names + 1] = n end
+            if n and n ~= "last" then names[#names + 1] = n end
         end
     end)
     table.sort(names)
@@ -491,6 +613,27 @@ local function applyFactoryConfig(data)
     if type(data.enabledTiers) == "table" and #data.enabledTiers > 0 then cfg.enabledTiers = data.enabledTiers end
     if data.autoMisi ~= nil then cfg.autoMisi = (data.autoMisi == true) end
     if type(data.misiFokus) == "string" then cfg.misiFokus = data.misiFokus end
+    if data.autoKirim ~= nil then cfg.autoKirim = (data.autoKirim == true) end
+    if type(data.kirimBerdasarkan) == "string" then cfg.kirimBerdasarkan = data.kirimBerdasarkan end
+    if tonumber(data.intervalKirim) then cfg.intervalKirim = math.floor(tonumber(data.intervalKirim)) end
+    if type(data.jenisKirim) == "table" then cfg.jenisKirim = data.jenisKirim end
+    if type(data.kecualikan) == "table" then cfg.kecualikan = data.kecualikan end
+    if data.autoSiram ~= nil then cfg.autoSiram = (data.autoSiram == true) end
+    if tonumber(data.waktuSiram) then cfg.waktuSiram = math.floor(tonumber(data.waktuSiram)) end
+    if data.autoIsiAir ~= nil then cfg.autoIsiAir = (data.autoIsiAir == true) end
+    if tonumber(data.isiSaat) then cfg.isiSaat = tonumber(data.isiSaat) end
+    if data.autoAmbilMagnet ~= nil then cfg.autoAmbilMagnet = (data.autoAmbilMagnet == true) end
+    if type(data.itemDiambil) == "string" then cfg.itemDiambil = data.itemDiambil end
+    if tonumber(data.jarakAmbil) then cfg.jarakAmbil = tonumber(data.jarakAmbil) end
+    if data.autoDestroy ~= nil then cfg.autoDestroy = (data.autoDestroy == true) end
+    if data.autoResearchLab ~= nil then cfg.autoResearchLab = (data.autoResearchLab == true) end
+    if type(data.researchPriority) == "table" and #data.researchPriority > 0 then cfg.researchPriority = data.researchPriority cfg.researchPilihan = data.researchPriority end
+    if data.autoFarmMastery ~= nil then cfg.autoFarmMastery = (data.autoFarmMastery == true) end
+    if type(data.farmMasteryPriority) == "table" and #data.farmMasteryPriority > 0 then cfg.farmMasteryPriority = data.farmMasteryPriority cfg.farmSkillPilihan = data.farmMasteryPriority end
+    if data.autoSpeed ~= nil then cfg.autoSpeed = (data.autoSpeed == true) end
+    if tonumber(data.speedTarget) then cfg.speedTarget = math.clamp(math.floor(tonumber(data.speedTarget)), 1, 100) end
+    if data.autoWolf ~= nil then cfg.autoWolf = (data.autoWolf == true) end
+    if tonumber(data.wolfMinHp) then cfg.wolfMinHp = tonumber(data.wolfMinHp) end
     if cfg.autoMisi then refreshReserved() else missionReserved = {} end
     pcall(function() autoProduksiToggle:Set(cfg.autoProduksi) end)
     pcall(function() jumlahDropdown:Set(tostring(cfg.amount)) end)
@@ -511,7 +654,33 @@ local function applyFactoryConfig(data)
     if #disp > 0 then pcall(function() tierDropdown:Set(disp) end) end
     pcall(function() autoMisiToggle:Set(cfg.autoMisi) end)
     pcall(function() fokusDropdown:Set(cfg.misiFokus) end)
+    pcall(function() autoKirimToggle:Set(cfg.autoKirim) end)
+    pcall(function() kirimDropdown:Set(cfg.kirimBerdasarkan) end)
+    pcall(function() intervalSlider:Set(cfg.intervalKirim) end)
+    if type(cfg.jenisKirim) == "table" and #cfg.jenisKirim > 0 then pcall(function() jenisDropdown:Set(cfg.jenisKirim) end) end
+    if type(cfg.kecualikan) == "table" then
+        if #cfg.kecualikan > 0 then pcall(function() kecualikanDropdown:Set(cfg.kecualikan) end)
+        else pcall(function() kecualikanDropdown:Set({"Tidak Ada"}) end) end
+    end
+    pcall(function() siramToggle:Set(cfg.autoSiram) end)
+    pcall(function() waktuSiramDropdown:Set(tostring(cfg.waktuSiram) .. " detik") end)
+    pcall(function() isiAirToggle:Set(cfg.autoIsiAir) end)
+    pcall(function() isiSaatSlider:Set(cfg.isiSaat) end)
+    pcall(function() magnetToggle:Set(cfg.autoAmbilMagnet) end)
+    pcall(function() itemDropdown:Set(cfg.itemDiambil) end)
+    pcall(function() jarakSlider:Set(cfg.jarakAmbil) end)
+    pcall(function() autoDestroyToggle:Set(cfg.autoDestroy) end)
+    pcall(function() researchToggle:Set(cfg.autoResearchLab) end)
+    if type(cfg.researchPriority) == "table" and #cfg.researchPriority > 0 then pcall(function() researchDropdown:Set(cfg.researchPriority) end) end
+    pcall(function() farmToggle:Set(cfg.autoFarmMastery) end)
+    if type(cfg.farmMasteryPriority) == "table" and #cfg.farmMasteryPriority > 0 then pcall(function() farmDropdown:Set(cfg.farmMasteryPriority) end) end
+    pcall(function() speedToggle:Set(cfg.autoSpeed) end)
+    pcall(function() speedSlider:Set(cfg.speedTarget) end)
+    pcall(function() wolfToggle:Set(cfg.autoWolf) end)
+    pcall(function() wolfMinSlider:Set(cfg.wolfMinHp) end)
+    pcall(function() wolfStatusText:Set(cfg.autoWolf and "Mencari serigala..." or "Auto serigala OFF") end)
     pcall(function() misiStatusText:Set(cfg.autoMisi and getReservedText() or "Auto Misi OFF") end)
+    pcall(function() if syncDashFactory then syncDashFactory() end end)
     return true
 end
 local function SaveConfig(name)
@@ -523,6 +692,7 @@ local function SaveConfig(name)
     end)
     if ok then
         selectedConfig = name
+        saveLast()
         log("Config tersimpan: " .. name)
         notify("Config", "Tersimpan " .. name, 2)
         refreshConfigList()
@@ -542,6 +712,7 @@ local function LoadConfig(name)
     if not ok or type(data) ~= "table" then notify("Config", "File rusak: " .. name, 3) return false end
     applyFactoryConfig(data)
     selectedConfig = name
+    saveLast()
     log("Config dimuat: " .. name)
     notify("Config", "Dimuat " .. name, 2)
     return true
@@ -560,7 +731,7 @@ local function DeleteConfig(name)
     end
     return ok
 end
-SettingsTab:CreateText({ name = "Config Title", text = "Simpan & muat setting Factory" })
+SettingsTab:CreateText({ name = "Config Title", text = "Simpan & muat semua setting" })
 configDropdown = SettingsTab:CreateDropdown({
     name = "Pilih Config",
     description = "Daftar config yang tersimpan",
@@ -569,6 +740,7 @@ configDropdown = SettingsTab:CreateDropdown({
     flag = "PilihConfig",
     callback = function(v)
         local val = type(v)=="table" and v[1] or v
+        if val == nil or val == "" then return end
         selectedConfig = val
         log("Config dipilih: " .. tostring(val))
     end,
@@ -600,13 +772,13 @@ refreshConfigList()
 
 -- WATER TAB
 WaterTab:CreateText({ name = "Perawatan Rumput", text = "Jaga rumput tetap hijau" })
-local siramToggle = WaterTab:CreateToggle({
+siramToggle = WaterTab:CreateToggle({
     name = "Auto Siram",
     description = "Otomatis mencari rumput kering dan menyiramnya",
     value = false, flag = "AutoSiram",
     callback = function(v) cfg.autoSiram = v; log("Auto siram: "..tostring(v)); notify("Auto Siram", v and "AKTIF" or "MATI", 2) end,
 })
-local waktuSiramDropdown = WaterTab:CreateDropdown({
+waktuSiramDropdown = WaterTab:CreateDropdown({
     name = "Waktu Menyiram",
     description = "Lama menyiram di setiap titik",
     options = {"1 detik","2 detik","3 detik"},
@@ -621,13 +793,13 @@ local waktuSiramDropdown = WaterTab:CreateDropdown({
     end,
 })
 WaterTab:CreateDivider({ text = "Isi Air" })
-local isiAirToggle = WaterTab:CreateToggle({
+isiAirToggle = WaterTab:CreateToggle({
     name = "Auto Isi Air",
     description = "Isi ulang air otomatis saat persediaan rendah",
     value = true, flag = "AutoIsiAir",
     callback = function(v) cfg.autoIsiAir = v; log("Auto isi air: "..tostring(v)); notify("Auto Isi Air", v and "AKTIF" or "MATI", 2) end,
 })
-local isiSaatSlider = WaterTab:CreateSlider({
+isiSaatSlider = WaterTab:CreateSlider({
     name = "Isi Ulang Saat",
     description = "Teleport ke sumur dan isi sampai penuh",
     range = {10,90}, increment = 5, value = 30, suffix = "%", flag = "IsiSaat",
@@ -637,13 +809,13 @@ WaterTab:CreateText({ name = "Info Isi", text = "Isi ulang saat air di bawah 30%
 
 -- DELIVERY TAB
 DeliveryTab:CreateText({ name = "Auto Kirim", text = "Kirim hasil ke kota secara otomatis" })
-local autoKirimToggle = DeliveryTab:CreateToggle({
+autoKirimToggle = DeliveryTab:CreateToggle({
     name = "Auto Kirim",
     description = "Kirim otomatis sesuai mode",
     value = false, flag = "AutoKirim",
     callback = function(v) cfg.autoKirim = v; log("Auto kirim: "..tostring(v)); notify("Auto Kirim", v and "AKTIF - "..cfg.kirimBerdasarkan or "MATI", 2.5) end,
 })
-local kirimDropdown = DeliveryTab:CreateDropdown({
+kirimDropdown = DeliveryTab:CreateDropdown({
     name = "Kirim Berdasarkan",
     description = "Pilih kapan kirim terjadi (interval di bawah tetap dipakai)",
     options = {"Setiap Interval","Saat tas penuh","Saat berat penuh","Saat ada item"},
@@ -658,13 +830,13 @@ local kirimDropdown = DeliveryTab:CreateDropdown({
         notify("Kirim Berdasarkan", val, 2.5)
     end,
 })
-local intervalSlider = DeliveryTab:CreateSlider({
+intervalSlider = DeliveryTab:CreateSlider({
     name = "Interval",
     description = "Jeda antar pengiriman",
     range = {10,60}, increment = 2, value = 22, suffix = " detik", flag = "IntervalKirim",
     callback = function(v) cfg.intervalKirim = v; notify("Interval", v.." detik", 1.5) end,
 })
-DeliveryTab:CreateDropdown({
+jenisDropdown = DeliveryTab:CreateDropdown({
     name = "Jenis Item Dikirim",
     description = "Pilih kategori yang dikirim (bisa pilih banyak). Mentah: Telur/Wol/Susu/Daging. Olahan: Tepung/Benang/Sosis/Mentega. Jadi: Roti/Sweater/Hotdog/Keju.",
     options = {"Mentah", "Olahan", "Jadi"},
@@ -678,7 +850,7 @@ DeliveryTab:CreateDropdown({
         notify("Jenis Kirim", table.concat(vals, ", "), 2.5)
     end,
 })
-DeliveryTab:CreateDropdown({
+kecualikanDropdown = DeliveryTab:CreateDropdown({
     name = "Kecualikan Item",
     description = "Item yang TIDAK dikirim walau lolos Jenis (bisa pilih banyak). Pilih Tidak Ada = kirim semua.",
     options = {"Tidak Ada","Benang","Benang Cosmic","Benang Emas","Benang Sakura","Daging","Daging Cosmic","Daging Emas","Daging Sakura","Daging Serigala","Hotdog","Hotdog Cosmic","Hotdog Emas","Hotdog Sakura","Keju","Keju Cosmic","Keju Emas","Keju Sakura","Mentega","Mentega Cosmic","Mentega Emas","Mentega Sakura","Roti","Roti Cosmic","Roti Emas","Roti Sakura","Sosis","Sosis Cosmic","Sosis Emas","Sosis Sakura","Susu","Susu Cosmic","Susu Emas","Susu Sakura","Sweater","Sweater Cosmic","Sweater Emas","Sweater Sakura","Telur","Telur Cosmic","Telur Emas","Telur Sakura","Tepung","Tepung Cosmic","Tepung Emas","Tepung Sakura","Wol","Wol Cosmic","Wol Emas","Wol Sakura"},
@@ -721,13 +893,13 @@ DeliveryTab:CreateButton({
 
 -- MAGNET TAB
 MagnetTab:CreateText({ name = "Auto Ambil", text = "Sapu bersih seluruh farm + kembali ke posisi awal" })
-local magnetToggle = MagnetTab:CreateToggle({
+magnetToggle = MagnetTab:CreateToggle({
     name = "Auto Ambil",
     description = "Otomatis menyapu seluruh farm tiap beberapa detik (brutal, tanpa delay 1-1)",
     value = false, flag = "AutoAmbil",
     callback = function(v) cfg.autoAmbilMagnet = v; log("Auto ambil: "..tostring(v)); notify("Auto Ambil", v and "AKTIF" or "MATI", 2) end,
 })
-local itemDropdown = MagnetTab:CreateDropdown({
+itemDropdown = MagnetTab:CreateDropdown({
     name = "Item Yang Diambil",
     description = "Pilih jenis item",
     options = {"Semua","Emas & Cosmic","Sakura & Cosmic","Emas","Cosmic"},
@@ -740,7 +912,7 @@ local itemDropdown = MagnetTab:CreateDropdown({
         notify("Item Diambil", val, 2)
     end,
 })
-local jarakSlider = MagnetTab:CreateSlider({
+jarakSlider = MagnetTab:CreateSlider({
     name = "Delay Sapu Otomatis",
     description = "Jeda antar sapuan saat Auto Ambil ON (kecil = brutal, besar = ringan)",
     range = {1,5}, increment = 0.5, value = 2, suffix = " detik", flag = "JarakAmbil",
@@ -808,9 +980,244 @@ MagnetTab:CreateButton({
     end,
 })
 
+-- SERIGALA TAB - Auto hajar werewolf se-map (nempel brutal, tanpa jalan)
+local wolfRegistry = {}
+local function inspectWolf(m, hum)
+    pcall(function()
+        local info = {}
+        info[#info + 1] = "name=" .. m.Name .. " class=" .. m.ClassName .. " path=" .. m:GetFullName()
+        info[#info + 1] = "hp=" .. tostring(math.floor(hum.Health)) .. "/" .. tostring(math.floor(hum.MaxHealth))
+        local hrp = m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart
+        info[#info + 1] = "pos=" .. tostring(hrp and hrp.Position)
+        local kinds = {}
+        for _, d in ipairs(m:GetDescendants()) do
+            local k = d.ClassName
+            kinds[k] = (kinds[k] or 0) + 1
+        end
+        local ks = {}
+        for k, c in pairs(kinds) do ks[#ks + 1] = k .. "x" .. c end
+        table.sort(ks)
+        info[#info + 1] = "parts=" .. table.concat(ks, ",")
+        local taps = {}
+        for _, d in ipairs(m:GetDescendants()) do
+            if d:IsA("ClickDetector") then taps[#taps+1] = "Click:" .. d.Name .. ":dist=" .. tostring(d.MaxActivationDistance) end
+            if d:IsA("ProximityPrompt") then taps[#taps+1] = "Prompt:" .. d.Name .. ":hold=" .. tostring(d.HoldDuration) .. ":dist=" .. tostring(d.MaxActivationDistance) end
+        end
+        info[#info + 1] = "taps=" .. (#taps > 0 and table.concat(taps, "|") or "NONE")
+        local at = {}
+        pcall(function() for k, v in pairs(m:GetAttributes()) do at[#at+1] = k .. "=" .. tostring(v) end end)
+        info[#info + 1] = "attrs=" .. (#at > 0 and table.concat(at, ";") or "-")
+        local txt = table.concat(info, "\n")
+        log("Serigala spawn:\n" .. txt)
+        writefile("mcp/wolf-signature.txt", txt)
+    end)
+end
+pcall(function()
+    if getgenv().YupiWolfConn then getgenv().YupiWolfConn:Disconnect() end
+    getgenv().YupiWolfConn = workspace.DescendantAdded:Connect(function(v)
+        if v:IsA("Humanoid") then
+            local m = v.Parent
+            local isP = false
+            pcall(function() isP = Players:GetPlayerFromCharacter(m) ~= nil end)
+            if not isP and m and m:IsA("Model") then
+                wolfRegistry[m] = {model = m, hum = v, t = os.clock()}
+                inspectWolf(m, v)
+            end
+        end
+    end)
+end)
+local function liveWolves()
+    local res = {}
+    for m, w in pairs(wolfRegistry) do
+        if m and m.Parent and w.hum and w.hum.Health > 0 then
+            res[#res + 1] = w
+        else
+            wolfRegistry[m] = nil
+        end
+    end
+    return res
+end
+local function findWolves()
+    local live = liveWolves()
+    if #live > 0 then return live end
+    local res = {}
+    pcall(function()
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("Humanoid") and v.Health > 0 then
+                local m = v.Parent
+                local isP = false
+                pcall(function() isP = Players:GetPlayerFromCharacter(m) ~= nil end)
+                if not isP and m and m:IsA("Model") then
+                    res[#res + 1] = {model = m, hum = v}
+                end
+            end
+        end
+    end)
+    return res
+end
+local function equipShears()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    if char:FindFirstChild("Shears") then return true end
+    local tool = LocalPlayer.Backpack:FindFirstChild("Shears")
+    if tool then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then pcall(function() hum:EquipTool(tool) end) else tool.Parent = char end
+        task.wait(0.3)
+        return char:FindFirstChild("Shears") ~= nil
+    end
+    return false
+end
+local function getWolfText()
+    local wolves = findWolves()
+    if #wolves == 0 then return "Tidak ada serigala" end
+    local lines = {}
+    local myPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position
+    for i, w in ipairs(wolves) do
+        local hrp = w.model:FindFirstChild("HumanoidRootPart") or w.model.PrimaryPart
+        local dist = ""
+        if myPos and hrp then dist = " [" .. math.floor((myPos - hrp.Position).Magnitude) .. "m]" end
+        lines[#lines + 1] = i .. ". " .. w.model.Name .. " " .. math.floor(w.hum.Health) .. "/" .. math.floor(w.hum.MaxHealth) .. dist
+        if i >= 8 then break end
+    end
+    return table.concat(lines, "\n")
+end
+local wolfBusy = false
+local function wolfAnchor(w)
+    local m = w.model
+    for _, n in ipairs({"HumanoidRootPart", "UpperTorso", "Torso", "Head"}) do
+        local p = m:FindFirstChild(n)
+        if p and p:IsA("BasePart") then return p end
+    end
+    return m:FindFirstChildWhichIsA("BasePart")
+end
+local function wolfTap(w)
+    local n = 0
+    local tb = w.model:FindFirstChild("TextButton", true)
+    if not tb then return 0 end
+    for _, sig in ipairs({"Activated", "MouseButton1Click"}) do
+        local ok, list = pcall(function() return getconnections(tb[sig]) end)
+        if ok and list then
+            for _, c in ipairs(list) do
+                if pcall(function() c.Function() end) then n += 1 end
+            end
+        end
+    end
+    return n
+end
+local function wolfSweep(maxKill)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return 0, 0 end
+    if wolfBusy then return 0, 0 end
+    wolfBusy = true
+    local startCf = hrp.CFrame
+    local beforeDmg = LocalPlayer:GetAttribute("Weekly_WerewolfDamage") or 0
+    local kills = 0
+    if equipShears() then
+        local side = 1
+        for _, w in ipairs(findWolves()) do
+            if not alive() then break end
+            if kills >= (maxKill or 10) then break end
+            local anchor = wolfAnchor(w)
+            if anchor and w.model.Parent and w.hum.Health > 0 then
+                local d0 = LocalPlayer:GetAttribute("Weekly_WerewolfDamage") or 0
+                for i = 1, 8 do
+                    if not alive() or w.hum.Health <= 0 or not w.model.Parent then break end
+                    wolfTap(w)
+                    task.wait(0.4)
+                end
+                task.wait(0.5)
+                local d1 = LocalPlayer:GetAttribute("Weekly_WerewolfDamage") or 0
+                if d1 > d0 then
+                    log("Tap mempan +" .. (d1 - d0) .. ", lanjut tap")
+                    local tTap = os.clock()
+                    while alive() and w.hum.Health > 0 and w.model.Parent and os.clock() - tTap < 40 do
+                        wolfTap(w)
+                        task.wait(0.5)
+                    end
+                else
+                    local lastHp = w.hum.Health
+                    local stuckT = os.clock()
+                    local t0 = os.clock()
+                    local warned = false
+                    while alive() and w.hum.Health > 0 and w.model.Parent and os.clock() - t0 < 40 do
+                        local myHum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                        if myHum and myHum.MaxHealth > 0 and (myHum.Health / myHum.MaxHealth * 100) < cfg.wolfMinHp then
+                            if not warned then log("HP rendah, mundur dulu") warned = true end
+                            break
+                        end
+                        side = -side
+                        pcall(function()
+                            local cur = wolfAnchor(w)
+                            local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            if cur and myHrp then myHrp.CFrame = cur.CFrame * CFrame.new(2 * side, 3, 0) end
+                        end)
+                        task.wait(0.3)
+                        if w.hum.Health < lastHp then lastHp = w.hum.Health stuckT = os.clock()
+                        elseif os.clock() - stuckT > 8 then break end
+                    end
+                end
+                if w.hum.Health <= 0 or not w.model.Parent then
+                    kills += 1
+                    log("Serigala tumbang (" .. kills .. ")")
+                end
+            end
+        end
+        for _, tool in ipairs(workspace:GetChildren()) do
+            if tool:IsA("Tool") and tool.Name == "Daging Serigala" then
+                local h = tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+                local p = h and h:FindFirstChild("ProductPrompt")
+                if p and p.Enabled then
+                    pcall(function() hrp.CFrame = h.CFrame * CFrame.new(0, 3, 0) end)
+                    task.wait(0.3)
+                    pcall(function() fireproximityprompt(p, p.HoldDuration) end)
+                    task.wait(0.4)
+                end
+            end
+        end
+    else
+        notify("Serigala", "Shears tidak ketemu", 2)
+    end
+    pcall(function()
+        local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if myHrp then myHrp.CFrame = startCf end
+    end)
+    wolfBusy = false
+    local afterDmg = LocalPlayer:GetAttribute("Weekly_WerewolfDamage") or 0
+    return kills, afterDmg - beforeDmg
+end
+WolfTab:CreateText({ name = "Auto Serigala", text = "Nempel ke serigala se-map + hajar brutal" })
+wolfToggle = WolfTab:CreateToggle({
+    name = "Auto Hajar Serigala",
+    description = "Otomatis tempel & hajar tiap ada serigala",
+    value = false, flag = "AutoWolf",
+    callback = function(v) cfg.autoWolf = v; log("Auto serigala: "..tostring(v)); notify("Serigala", v and "AKTIF" or "MATI", 2) end,
+})
+wolfMinSlider = WolfTab:CreateSlider({
+    name = "HP Aman",
+    description = "Mundur kalau HP di bawah ini",
+    range = {10,100}, increment = 5, value = 30, suffix = "%", flag = "WolfMinHp",
+    callback = function(v) cfg.wolfMinHp = v; notify("HP Aman", v.."%", 1.5) end,
+})
+wolfStatusText = WolfTab:CreateText({ name = "Daftar Serigala", text = "Auto serigala OFF" })
+WolfTab:CreateButton({
+    name = "HANTAM SEKARANG",
+    description = "Sapu serigala 1x + pungut daging",
+    callback = function()
+        if wolfBusy then notify("Serigala", "Lagi hajar, tunggu", 2) return end
+        task.spawn(function()
+            local k, d = wolfSweep(10)
+            log("Hantam: " .. k .. " tumbang, +" .. d .. " damage")
+            pcall(function() wolfStatusText:Set(getWolfText()) end)
+            notify("Serigala", k .. " tumbang +" .. d .. " dmg", 2.5)
+        end)
+    end,
+})
+
 -- SETTINGS TAB - Auto Hancurkan bekas script di layar
 SettingsTab:CreateText({ name = "Kelola Script", text = "Bersihkan bekas script & window numpuk" })
-SettingsTab:CreateToggle({
+autoDestroyToggle = SettingsTab:CreateToggle({
     name = "Auto Hancurkan Script Lama",
     description = "ON = tiap buka hub otomatis tutup window lama",
     value = true,
@@ -869,7 +1276,7 @@ SettingsTab:CreateButton({
 
 -- UPGRADE TAB - Auto Research Lab & Farming Skill
 UpgradeTab:CreateText({ name = "Auto Upgrade", text = "Otomatis beli research & farming skill (bulk)" })
-UpgradeTab:CreateToggle({
+researchToggle = UpgradeTab:CreateToggle({
     name = "Auto Research Lab",
     description = "Otomatis research lab jika slot kosong",
     value = false,
@@ -880,7 +1287,7 @@ UpgradeTab:CreateToggle({
         notify("Auto Research", v and "AKTIF" or "MATI", 2)
     end,
 })
-UpgradeTab:CreateToggle({
+farmToggle = UpgradeTab:CreateToggle({
     name = "Auto Farming Skill",
     description = "Otomatis beli farming skill (Farm Mastery) termurah",
     value = false,
@@ -891,7 +1298,7 @@ UpgradeTab:CreateToggle({
         notify("Auto Farming", v and "AKTIF" or "MATI", 2)
     end,
 })
-UpgradeTab:CreateDropdown({
+researchDropdown = UpgradeTab:CreateDropdown({
     name = "Research Prioritas",
     description = "Pilih 1+ research, akan antri: 1 dulu, selesai baru 2 (prioritas urutan pilih)",
     options = {"RebirthOptimization","RevenueOverclock","SalesBonus","CosmicSynthesis","SakuraGenetics","AdvancedScholar","StorageExpansion","TimeWarpScience","RebirthWealth","SakuraGenetics","TimeWarpScience","CosmicSynthesis"},
@@ -905,7 +1312,7 @@ UpgradeTab:CreateDropdown({
         notify("Research", table.concat(vals,", "), 2)
     end,
 })
-UpgradeTab:CreateDropdown({
+farmDropdown = UpgradeTab:CreateDropdown({
     name = "Farming Skill Prioritas",
     description = "Pilih farming skill yang mau di-auto beli (urut prioritas)",
     options = {"DoubleYield","FactoryOverclock","Industrialist","ExtraAnimal","FastDelivery","SpeedRunner","ExtraStorage","AutoHarvest","HydroCan","SmartShopper","SmartBuilder","WeaponMastery","StarCollector","PremiumAnimal","MoneyMultiplier","DeliveryCapacity","FastLearner","SmartBuilder","FactoryDiscount"},
@@ -1312,6 +1719,624 @@ task.spawn(function()
         end
     end
 end)
+
+-- AUTO SPEED - kunci WalkSpeed 1-100 sesuai slider (1 pelan - 100 tercepat)
+task.spawn(function()
+    while alive() do
+        task.wait(1)
+        if cfg.autoSpeed and alive() then
+            pcall(function()
+                local char = LocalPlayer.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    local goal = math.clamp(math.floor(tonumber(cfg.speedTarget) or 36), 1, 100)
+                    if hum.WalkSpeed ~= goal then hum.WalkSpeed = goal end
+                end
+            end)
+        end
+    end
+end)
+
+-- AUTO SERIGALA - sapu tiap ada yang spawn + update daftar
+task.spawn(function()
+    while alive() do
+        task.wait(2)
+        if cfg.autoWolf and alive() and not wolfBusy then
+            local wolves = findWolves()
+            pcall(function() wolfStatusText:Set(getWolfText()) end)
+            if #wolves > 0 then
+                local k, d = wolfSweep(10)
+                if k > 0 or d > 0 then log("Auto serigala: " .. k .. " tumbang +" .. d .. " dmg") end
+                pcall(function() wolfStatusText:Set(getWolfText()) end)
+            end
+        end
+    end
+end)
+
+-- FACTORY CONFIG - autosave tiap 60 detik + autoload saat hub dibuka (biar setting tidak hilang)
+task.spawn(function()
+    while alive() do
+        task.wait(60)
+        if alive() then saveLast() end
+    end
+end)
+task.spawn(function()
+    task.wait(3)
+    if getgenv().YupiHub_Instance ~= myInstance then return end
+    local ok, data = pcall(function() return HttpService:JSONDecode(readfile(LAST_PATH)) end)
+    if ok and type(data) == "table" then
+        applyFactoryConfig(data)
+        log("Config otomatis dimuat (terakhir)")
+        notify("Config", "Otomatis: setting terakhir dipulihkan", 2.5)
+    end
+end)
+
+-- YUPI DARK - penegakan warna kustom (kartu Delivery merah, label sekunder, ikon tab)
+local function enforceYupiTheme()
+    pcall(function()
+        local rg = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+        if not rg then return end
+        for _, v in ipairs(rg:GetDescendants()) do
+            if v:IsA("Frame") and v.Name == "Delivery Items" then
+                local hasTitle = false
+                pcall(function()
+                    for _, d in ipairs(v:GetChildren()) do
+                        if d:IsA("TextLabel") then
+                            local t = d.Text or ""
+                            if t == "Delivery Items" then hasTitle = true break end
+                        end
+                    end
+                end)
+                if hasTitle then
+                    pcall(function() v.BackgroundColor3 = YUPI_RED_BG end)
+                    pcall(function()
+                        local u = v:FindFirstChildOfClass("UIStroke")
+                        if u then u.Color = YUPI_RED_STROKE end
+                    end)
+                    for _, d in ipairs(v:GetDescendants()) do
+                        if d:IsA("TextLabel") then
+                            pcall(function() d.TextColor3 = YUPI_RED_TEXT end)
+                            pcall(function() d.BackgroundColor3 = YUPI_RED_BG end)
+                        elseif d:IsA("Frame") then
+                            pcall(function()
+                                local c = d.BackgroundColor3
+                                if c.R > 0.9 and c.G > 0.9 and c.B > 0.9 then
+                                    d.BackgroundColor3 = YUPI_RED_BAR
+                                else
+                                    d.BackgroundColor3 = YUPI_RED_BG
+                                end
+                            end)
+                        elseif d:IsA("UIStroke") then
+                            pcall(function() d.Color = YUPI_RED_STROKE end)
+                        end
+                    end
+                end
+            end
+        end
+        for _, v in ipairs(rg:GetDescendants()) do
+            if v:IsA("TextLabel") then
+                local t = ""
+                pcall(function() t = v.Text or "" end)
+                if #t >= 20 and string.find(t, " ") and t ~= string.upper(t) and string.sub(t, 1, 1) ~= "[" then
+                    local skip, isTitle = false, false
+                    pcall(function()
+                        local p = v.Parent
+                        local lvl = 0
+                        while p and lvl < 5 do
+                            if p.Name == "Delivery Items" then skip = true end
+                            if p.Name == "Aktivitas" then skip = true end
+                            if p:IsA("Frame") and p.Name == t then isTitle = true end
+                            p = p.Parent
+                            lvl += 1
+                        end
+                    end)
+                    if not skip and not isTitle then
+                        pcall(function() v.TextColor3 = YUPI_GRAY end)
+                    end
+                end
+            end
+        end
+        for _, v in ipairs(rg:GetDescendants()) do
+            if v.Name == "Tabs" and v:IsA("ScrollingFrame") then
+                for _, d in ipairs(v:GetDescendants()) do
+                    if d:IsA("ImageLabel") or d:IsA("ImageButton") then
+                        pcall(function() d.ImageColor3 = YUPI_ICON end)
+                    end
+                end
+            end
+        end
+        styleConsoleText()
+    end)
+end
+task.delay(2, function() pcall(enforceYupiTheme) end)
+task.spawn(function()
+    while alive() do
+        task.wait(8)
+        if alive() then enforceYupiTheme() end
+    end
+end)
+
+-- YUPI DASHBOARD - shell tampilan kartu (dark): tab, widget, navigasi
+local DASH = {
+    bg = Color3.fromRGB(26, 26, 26),
+    card = Color3.fromRGB(36, 36, 36),
+    card2 = Color3.fromRGB(44, 44, 44),
+    line = Color3.fromRGB(255, 255, 255),
+    text = Color3.fromRGB(245, 245, 245),
+    gray = Color3.fromRGB(156, 163, 175),
+    darkText = Color3.fromRGB(26, 26, 26),
+    accent = Color3.fromRGB(59, 130, 246),
+    accentDark = Color3.fromRGB(37, 99, 235),
+    unchecked = Color3.fromRGB(75, 75, 75),
+    div = Color3.fromRGB(42, 42, 42),
+}
+local dashGui, dashFloat, dashRoot, dashContent = nil, nil, nil, nil
+local dashPages, dashPills = {}, {}
+local dashDDRefresh, dashPaints = {}, {}
+local customPages = {}
+local currentDashPage = "Factory"
+local dashOpenPopup, dashScrollHooked = nil, false
+local function dMk(cls, props, parent)
+    local o = Instance.new(cls)
+    for k, v in pairs(props) do
+        if k == "Corner" then
+            local u = Instance.new("UICorner") u.CornerRadius = v u.Parent = o
+        elseif k == "Stroke" then
+            local u = Instance.new("UIStroke")
+            if typeof(v) == "table" then u.Color = v[1] u.Transparency = v[2] else u.Color = v end
+            u.ApplyStrokeMode = Enum.ApplyStrokeMode.Border u.Thickness = 1 u.Parent = o
+        elseif k == "Pad" then
+            local u = Instance.new("UIPadding")
+            u.PaddingTop = UDim.new(0, v) u.PaddingBottom = UDim.new(0, v)
+            u.PaddingLeft = UDim.new(0, v) u.PaddingRight = UDim.new(0, v)
+            u.Parent = o
+        else
+            o[k] = v
+        end
+    end
+    o.Parent = parent
+    return o
+end
+local function dashParent()
+    local par = nil
+    pcall(function()
+        local rg = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+        if rg then
+            for _, ch in ipairs(rg:GetChildren()) do
+                for _, d in ipairs(ch:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text == "Yupi Hub" then par = ch.Parent break end
+                end
+                if par then break end
+            end
+        end
+    end)
+    if par then return par end
+    local ok, hui = pcall(function() return gethui and gethui() end)
+    if ok and hui then return hui end
+    return game:GetService("CoreGui")
+end
+local yupiGuiRef = nil
+local function getYupiGui()
+    if yupiGuiRef and yupiGuiRef.Parent then return yupiGuiRef end
+    yupiGuiRef = nil
+    pcall(function()
+        local rg = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+        if rg then
+            for _, ch in ipairs(rg:GetChildren()) do
+                local has = false
+                for _, d in ipairs(ch:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text == "Yupi Hub" then has = true break end
+                end
+                if has then yupiGuiRef = ch break end
+            end
+        end
+    end)
+    return yupiGuiRef
+end
+local function dashClosePopup()
+    if dashOpenPopup then pcall(function() dashOpenPopup:Destroy() end) dashOpenPopup = nil end
+end
+local function paintPills(active)
+    for name, b in pairs(dashPills) do
+        if name == active then
+            b.BackgroundColor3 = DASH.text
+            local t = b:FindFirstChildOfClass("TextLabel") or b
+            pcall(function()
+                local lbl = b:FindFirstChild("lbl")
+                if lbl then lbl.TextColor3 = DASH.darkText end
+            end)
+            b.Font = Enum.Font.GothamBold
+        else
+            b.BackgroundColor3 = DASH.card
+            pcall(function()
+                local lbl = b:FindFirstChild("lbl")
+                if lbl then lbl.TextColor3 = DASH.text end
+            end)
+            b.Font = Enum.Font.GothamMedium
+        end
+    end
+end
+local function showDashPage(name)
+    currentDashPage = name
+    dashClosePopup()
+    for k, p in pairs(dashPages) do p.Visible = (k == name) end
+    paintPills(name)
+    if dashGui then pcall(function() dashGui.Enabled = true end) end
+    if dashFloat then pcall(function() dashFloat.Visible = false end) end
+    local g = getYupiGui()
+    if g then pcall(function() g.Enabled = false end) end
+end
+local function gotoRayfieldTab(name)
+    dashClosePopup()
+    if dashGui then pcall(function() dashGui.Enabled = false end) end
+    if dashFloat then pcall(function() dashFloat.Visible = true end) end
+    local g = getYupiGui()
+    if g then pcall(function() g.Enabled = true end) end
+    pcall(function()
+        local rg = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+        if not rg then return end
+        for _, t in ipairs(rg:GetDescendants()) do
+            if t.Name == "Tabs" and t:IsA("ScrollingFrame") then
+                for _, b in ipairs(t:GetChildren()) do
+                    if b:IsA("Frame") then
+                        local title = nil
+                        for _, d in ipairs(b:GetDescendants()) do
+                            if d:IsA("TextLabel") and (d.Text or "") == name then title = d break end
+                        end
+                        if title then
+                            local p = title.Parent
+                            local lvl = 0
+                            while p and lvl < 5 do
+                                for _, s in ipairs(p:GetChildren()) do
+                                    if s:IsA("TextButton") or s:IsA("ImageButton") then
+                                        for _, sig in ipairs({"Activated", "MouseButton1Click"}) do
+                                            local okc, list = pcall(function() return getconnections(s[sig]) end)
+                                            if okc and list and #list > 0 then pcall(function() list[1].Function() end) return end
+                                        end
+                                    end
+                                end
+                                p = p.Parent
+                                lvl += 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+local function dashCheck(parent, get, set)
+    local box = dMk("Frame", {Name = "check", BackgroundColor3 = DASH.card2, BorderSizePixel = 0, Size = UDim2.new(0, 26, 0, 26)}, parent)
+    dMk("UICorner", {}, box).CornerRadius = UDim.new(0, 6)
+    local st = dMk("UIStroke", {}, box)
+    st.Color = DASH.unchecked
+    st.Thickness = 2
+    st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    local b1 = dMk("Frame", {BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 1, 0.56, 0), Size = UDim2.new(0, 13, 0, 3), Rotation = 45, Visible = false}, box)
+    local b2 = dMk("Frame", {BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.38, 0, 0.52, 0), Size = UDim2.new(0, 8, 0, 3), Rotation = -45, Visible = false}, box)
+    local function paint()
+        local on = get() and true or false
+        box.BackgroundColor3 = on and DASH.accent or DASH.card
+        box.BackgroundTransparency = on and 0 or 1
+        st.Color = on and DASH.accent or DASH.unchecked
+        st.Thickness = on and 1 or 2
+        b1.Visible = on
+        b2.Visible = on
+    end
+    dashPaints[#dashPaints + 1] = paint
+    paint()
+    return {box = box, paint = paint}
+end
+local function dashDropdown(rootLayer, content, get, set, items, multi)
+    local pill = dMk("TextButton", {Name = "dd", Text = "", AutoButtonColor = false, BackgroundColor3 = Color3.fromRGB(44, 44, 44), Size = UDim2.new(0, 140, 0, 40)}, nil)
+    dMk("UICorner", {}, pill).CornerRadius = UDim.new(0, 12)
+    local st = dMk("UIStroke", {}, pill)
+    st.Color = DASH.line
+    st.Transparency = 0.92
+    st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    dMk("TextLabel", {Name = "chev", BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = DASH.gray, Text = "▾", Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -28, 0, 0)}, pill)
+    local val = dMk("TextLabel", {Name = "val", BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 17, TextColor3 = DASH.text, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 16, 0, 0)}, pill)
+    local function refresh()
+        local sel = get()
+        if type(sel) ~= "table" then sel = {tostring(sel)} end
+        val.Text = table.concat(sel, ", ")
+    end
+    dashDDRefresh[#dashDDRefresh + 1] = refresh
+    pill.MouseButton1Click:Connect(function()
+        if dashOpenPopup then dashClosePopup() return end
+        local cur = get()
+        if type(cur) ~= "table" then cur = {tostring(cur)} end
+        local inSet = {}
+        for _, s in ipairs(cur) do inSet[s] = true end
+        local pop = dMk("Frame", {Name = "ddpop", BackgroundColor3 = Color3.fromRGB(44, 44, 44), Size = UDim2.new(0, 180, 0, #items * 42 + 12)}, rootLayer)
+        dMk("UICorner", {}, pop).CornerRadius = UDim.new(0, 12)
+        local pst = dMk("UIStroke", {}, pop)
+        pst.Color = DASH.line
+        pst.Transparency = 0.92
+        pst.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        pcall(function()
+            local px = pill.AbsolutePosition.X - rootLayer.AbsolutePosition.X
+            local py = pill.AbsolutePosition.Y - rootLayer.AbsolutePosition.Y + pill.AbsoluteSize.Y + 6
+            pop.Position = UDim2.fromOffset(px - (180 - pill.AbsoluteSize.X), py)
+        end)
+        local rows = {}
+        local function repaint()
+            for _, r in ipairs(rows) do
+                r.check.Visible = inSet[r.name] and true or false
+            end
+        end
+        for i, name in ipairs(items) do
+            local rb = dMk("TextButton", {Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 42), LayoutOrder = i}, pop)
+            dMk("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 16, TextColor3 = DASH.text, TextXAlignment = Enum.TextXAlignment.Left, Text = name, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 14, 0, 0)}, rb)
+            local cb = dMk("Frame", {BackgroundColor3 = inSet[name] and DASH.accent or DASH.card, BorderSizePixel = 0, Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(1, -32, 0.5, -10)}, rb)
+            dMk("UICorner", {}, cb).CornerRadius = UDim.new(0, 6)
+            local entry = {name = name, btn = rb, check = cb}
+            rows[#rows + 1] = entry
+            rb.MouseButton1Click:Connect(function()
+                if multi then
+                    if inSet[name] then inSet[name] = nil else inSet[name] = true end
+                    local sel = {}
+                    for _, it in ipairs(items) do if inSet[it] then sel[#sel + 1] = it end end
+                    set(sel)
+                    repaint()
+                    refresh()
+                else
+                    set({name})
+                    refresh()
+                    dashClosePopup()
+                end
+            end)
+        end
+        local ll = dMk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0)}, pop)
+        repaint()
+        dashOpenPopup = pop
+    end)
+    refresh()
+    return {pill = pill, refresh = refresh}
+end
+
+-- DASHBOARD: halaman Factory (referensi mockup dark)
+local function dashSection(parent, order, text)
+    return dMk("TextLabel", {Name = "sec", BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 15, TextColor3 = DASH.gray, TextXAlignment = Enum.TextXAlignment.Left, Text = text, Size = UDim2.new(1, -8, 0, 22), Position = UDim2.new(0, 4, 0, 0), LayoutOrder = order}, parent)
+end
+local function dashCard(parent, order)
+    local c = dMk("Frame", {Name = "card", BackgroundColor3 = DASH.card, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = order}, parent)
+    dMk("UICorner", {}, c).CornerRadius = UDim.new(0, 16)
+    local st = dMk("UIStroke", {}, c)
+    st.Color = DASH.line
+    st.Transparency = 0.92
+    st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    st.Thickness = 1
+    dMk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0)}, c)
+    return c
+end
+local function dashDiv(parent, order)
+    return dMk("Frame", {BackgroundColor3 = DASH.line, BackgroundTransparency = 0.92, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 1), LayoutOrder = order}, parent)
+end
+local function dashCheckRow(parent, order, labelText, get, set)
+    local row = dMk("TextButton", {Name = "row", Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 60), LayoutOrder = order}, parent)
+    dMk("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 17, TextColor3 = DASH.text, TextXAlignment = Enum.TextXAlignment.Left, Text = labelText, Size = UDim2.new(1, -70, 1, 0), Position = UDim2.new(0, 18, 0, 0)}, row)
+    local chk = dashCheck(row, get, set)
+    chk.box.Position = UDim2.new(1, -44, 0.5, -13)
+    row.MouseButton1Click:Connect(function()
+        set(not get())
+        chk.paint()
+    end)
+    return chk
+end
+local function dashDropRow(parent, order, labelText, dd)
+    local row = dMk("Frame", {Name = "row", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 60), LayoutOrder = order}, parent)
+    dMk("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 17, TextColor3 = DASH.text, TextXAlignment = Enum.TextXAlignment.Left, Text = labelText, Size = UDim2.new(1, -190, 1, 0), Position = UDim2.new(0, 18, 0, 0)}, row)
+    dd.pill.Parent = row
+    dd.pill.Position = UDim2.new(1, -168, 0.5, -20)
+    return row
+end
+local function tierDisplay()
+    local set = {}
+    for _, t in ipairs(cfg.enabledTiers or {}) do set[t] = true end
+    if set.Default and set.Gold and set.Sakura and set.Cosmic then return {"Semua"} end
+    local map = {Gold = "Emas", Sakura = "Sakura", Cosmic = "Cosmic"}
+    local d = {}
+    for _, t in ipairs(cfg.enabledTiers or {}) do if map[t] then d[#d + 1] = map[t] end end
+    if #d == 0 then return {"Emas"} end
+    return d
+end
+local function applyTierDisplay(sel)
+    local hasSemua = false
+    for _, sv in ipairs(sel) do if sv == "Semua" then hasSemua = true break end end
+    if hasSemua then
+        cfg.enabledTiers = {"Default", "Gold", "Sakura", "Cosmic"}
+    else
+        local map = {Emas = "Gold", Sakura = "Sakura", Cosmic = "Cosmic"}
+        local en = {}
+        for _, sv in ipairs(sel) do local it = map[sv] or sv if it ~= "Default" then en[#en + 1] = it end end
+        if #en == 0 then en = {"Gold"} sel = {"Emas"} end
+        cfg.enabledTiers = en
+    end
+    pcall(function() tierDropdown:Set(sel) end)
+end
+local function buildYupiDash()
+    local parent = dashParent()
+    dashGui = dMk("ScreenGui", {Name = "YupiDash", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 5, Enabled = false}, parent)
+    local root = dMk("Frame", {Name = "root", BackgroundColor3 = DASH.bg, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0)}, dashGui)
+    dashRoot = root
+    dashContent = dMk("ScrollingFrame", {Name = "content", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0), CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 4, ScrollBarImageColor3 = DASH.gray}, root)
+    dMk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0)}, dashContent)
+    local cpad = dMk("UIPadding", {}, dashContent)
+    cpad.PaddingTop = UDim.new(0, 20)
+    cpad.PaddingBottom = UDim.new(0, 24)
+    cpad.PaddingLeft = UDim.new(0, 16)
+    cpad.PaddingRight = UDim.new(0, 16)
+    dashContent:GetPropertyChangedSignal("CanvasPosition"):Connect(function() dashClosePopup() end)
+    local tabBar = dMk("Frame", {Name = "tabbar", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 46), LayoutOrder = 1}, dashContent)
+    dMk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 10)}, tabBar)
+    local pillNames = {"Main", "Factory", "Water", "Delivery"}
+    for i, name in ipairs(pillNames) do
+        local b = dMk("TextButton", {Name = "pill" .. name, Text = "", AutoButtonColor = false, BackgroundColor3 = DASH.card, BorderSizePixel = 0, Size = UDim2.new(0.25, -8, 1, 0), LayoutOrder = i}, tabBar)
+        dMk("UICorner", {}, b).CornerRadius = UDim.new(1, 0)
+        local pst = dMk("UIStroke", {}, b)
+        pst.Color = DASH.line
+        pst.Transparency = 0.92
+        pst.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        pst.Thickness = 1
+        dMk("TextLabel", {Name = "lbl", BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = DASH.gray, Text = name, Size = UDim2.new(1, 0, 1, 0)}, b)
+        dashPills[name] = b
+        b.MouseButton1Click:Connect(function()
+            dashClosePopup()
+            if name == "Factory" and customPages.Factory then
+                showDashPage("Factory")
+            else
+                paintPills(name)
+                gotoRayfieldTab(name)
+            end
+        end)
+    end
+    dMk("Frame", {BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 16), LayoutOrder = 2}, dashContent)
+    local fpage = dMk("Frame", {Name = "pageFactory", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 10, Visible = false}, dashContent)
+    dMk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0)}, fpage)
+    dashPages.Factory = fpage
+    customPages.Factory = true
+    local ord = 10
+    local function no()
+        ord += 1
+        return ord
+    end
+    dashSection(fpage, no(), "Produksi otomatis")
+    local card1 = dashCard(fpage, no())
+    local corder = 0
+    local function co()
+        corder += 1
+        return corder
+    end
+    dashCheckRow(card1, co(), "Auto produksi", function() return cfg.autoProduksi end, function(v)
+        cfg.autoProduksi = v
+        cfg.autoAmbil = v
+        cfg.produksiLagi = v
+        pcall(function() autoProduksiToggle:Set(v) end)
+    end)
+    dashDiv(card1, co())
+    local jdd = dashDropdown(dashRoot, dashContent, function() return {tostring(cfg.amount)} end, function(sel)
+        local val = tonumber(sel[1]) or 5
+        cfg.amount = val
+        pcall(function() jumlahDropdown:Set(tostring(val)) end)
+    end, {"1", "2", "5", "10"}, false)
+    dashDropRow(card1, co(), "Jumlah produksi", jdd)
+    dashDiv(card1, co())
+    local tdd = dashDropdown(dashRoot, dashContent, tierDisplay, applyTierDisplay, {"Semua", "Emas", "Sakura", "Cosmic"}, true)
+    dashDropRow(card1, co(), "Tier produksi", tdd)
+    dashSection(fpage, no(), "Alur produksi")
+    local flow = dashCard(fpage, no())
+    local frow = dMk("Frame", {BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 76), LayoutOrder = 1}, flow)
+    dMk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 10)}, frow)
+    local fpad = dMk("UIPadding", {}, frow)
+    fpad.PaddingLeft = UDim.new(0, 18)
+    fpad.PaddingRight = UDim.new(0, 18)
+    for i, ft in ipairs({"Produksi", "→", "Ambil", "→", "Ulang"}) do
+        if ft == "→" then
+            dMk("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 18, TextColor3 = DASH.gray, Text = ft, Size = UDim2.new(0, 20, 1, 0), LayoutOrder = i}, frow)
+        else
+            local fp = dMk("Frame", {BackgroundColor3 = Color3.fromRGB(44, 44, 44), BorderSizePixel = 0, Size = UDim2.new(0, 0, 0, 40), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = i}, frow)
+            dMk("UICorner", {}, fp).CornerRadius = UDim.new(1, 0)
+            local fst = dMk("UIStroke", {}, fp)
+            fst.Color = DASH.line
+            fst.Transparency = 0.92
+            fst.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            fst.Thickness = 1
+            local fpad2 = dMk("UIPadding", {}, fp)
+            fpad2.PaddingLeft = UDim.new(0, 18)
+            fpad2.PaddingRight = UDim.new(0, 18)
+            dMk("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 16, TextColor3 = DASH.text, Text = ft, Size = UDim2.new(1, 0, 1, 0)}, fp)
+        end
+    end
+    dashSection(fpage, no(), "Misi")
+    local card2 = dashCard(fpage, no())
+    local corder2 = 100
+    local function co2()
+        corder2 += 1
+        return corder2
+    end
+    dashCheckRow(card2, co2(), "Auto misi", function() return cfg.autoMisi end, function(v)
+        cfg.autoMisi = v
+        if v then refreshReserved() else missionReserved = {} end
+        pcall(function() autoMisiToggle:Set(v) end)
+    end)
+    dashDiv(card2, co2())
+    local fdd = dashDropdown(dashRoot, dashContent, function()
+        local m = cfg.misiFokus
+        if type(m) == "table" then m = m[1] end
+        return {tostring(m)}
+    end, function(sel)
+        local val = sel[1]
+        cfg.misiFokus = val
+        if cfg.autoMisi then refreshReserved() end
+        pcall(function() fokusDropdown:Set(val) end)
+    end, {"Semua", "1 Teratas", "3 Teratas", "5 Teratas"}, false)
+    dashDropRow(card2, co2(), "Fokus misi", fdd)
+    local lihatBtn = dMk("TextButton", {Name = "lihatBtn", Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 56), LayoutOrder = no()}, fpage)
+    local lbst = dMk("UIStroke", {}, lihatBtn)
+    lbst.Color = DASH.line
+    lbst.Transparency = 0.92
+    lbst.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    lbst.Thickness = 1
+    dMk("UICorner", {}, lihatBtn).CornerRadius = UDim.new(0, 14)
+    dMk("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 17, TextColor3 = DASH.text, Text = "Lihat daftar misi", Size = UDim2.new(1, 0, 1, 0)}, lihatBtn)
+    lihatBtn.MouseButton1Click:Connect(function()
+        refreshReserved()
+        for _, line in ipairs(getMisiLines()) do log(line) end
+    end)
+    dMk("Frame", {BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 24), LayoutOrder = no()}, fpage)
+    dashFloat = dMk("TextButton", {Name = "YupiFloat", Text = "", AutoButtonColor = false, BackgroundColor3 = DASH.accentDark, BorderSizePixel = 0, Size = UDim2.new(0, 56, 0, 56), Position = UDim2.new(1, -76, 1, -170), Visible = false}, nil)
+    dMk("UICorner", {}, dashFloat).CornerRadius = UDim.new(1, 0)
+    local fcb = dMk("TextButton", {BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 26, TextColor3 = Color3.fromRGB(255, 255, 255), Text = "Y", Size = UDim2.new(1, 0, 1, 0)}, dashFloat)
+    do
+        local fg = dashParent()
+        dashFloat.Parent = fg
+        local dragging, floatMoved = false, false
+        local dsx, dsy, dpx, dpy = 0, 0, 0, 0
+        dashFloat.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                floatMoved = false
+                dsx, dsy = inp.Position.X, inp.Position.Y
+                dpx, dpy = dashFloat.Position.X.Offset, dashFloat.Position.Y.Offset
+            end
+        end)
+        local UIS = game:GetService("UserInputService")
+        UIS.InputChanged:Connect(function(inp)
+            if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+                if math.abs(inp.Position.X - dsx) + math.abs(inp.Position.Y - dsy) > 12 then floatMoved = true end
+                dashFloat.Position = UDim2.new(1, dpx + (inp.Position.X - dsx), 1, dpy + (inp.Position.Y - dsy))
+            end
+        end)
+        UIS.InputEnded:Connect(function(inp)
+            if dragging and (inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch) then
+                dragging = false
+            end
+        end)
+        fcb.MouseButton1Click:Connect(function()
+            if floatMoved then return end
+            showDashPage(currentDashPage)
+        end)
+    end
+    syncDashFactory = function()
+        for _, fn in ipairs(dashPaints) do pcall(fn) end
+        for _, fn in ipairs(dashDDRefresh) do pcall(fn) end
+    end
+    task.spawn(function()
+        while alive() do
+            task.wait(1)
+            if not alive() then break end
+            pcall(function() if syncDashFactory then syncDashFactory() end end)
+        end
+    end)
+    showDashPage("Factory")
+    task.delay(1.5, function()
+        local g = getYupiGui()
+        if g then pcall(function() g.Enabled = false end) end
+    end)
+end
+local okDash, errDash = pcall(buildYupiDash)
+if not okDash then print("dashboard gagal: " .. tostring(errDash)) end
 
 log("Hub loaded - Versi Newbie Friendly")
 notify("Hub Siap", "Mode newbie aktif", 3)
